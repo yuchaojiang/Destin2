@@ -1,2 +1,3 @@
 # Destin2
-Cross-modality dimension reduction and clustering for single-cell ATAC-seq data
+Integrative and cross-modality analysis of single-cell chromatin accessibility data
+
