@@ -96,7 +96,7 @@ GetMultiCCA=function(obj, reduction.list,
 #' @return Slingshot Lineages
 #'
 #' @importFrom SeuratObject CreateDimReducObject
-#' @import Seurat DimPlot
+#' @import Seurat
 #' @importFrom slingshot SlingshotDataSet
 #' @importFrom slingshot getLineages
 #' @import ggplot2
