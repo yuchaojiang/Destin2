@@ -104,7 +104,6 @@ GetMultiCCA=function(obj, reduction.list,
 #' @importFrom SeuratObject CreateDimReducObject
 #' @import Seurat
 #' @import slingshot
-#' @import ggplot2
 #' @export
 GetSlingshot=function(obj, reduction.to.construct, reduction.to.plot, cluster,
                       predicted.id=NULL,
@@ -158,4 +157,7 @@ GetSlingshot=function(obj, reduction.to.construct, reduction.to.plot, cluster,
   }
   return(SlingshotLineages)
 }
+
+
+
 
