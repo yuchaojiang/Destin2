@@ -35,7 +35,7 @@ GetConsensusPCA=function(obj, reduction.list,
   colnames(consensus.pca)=paste0('consensuspca_',1:n.consensus.pc)
 
   obj[["consensus.pca"]] <- SeuratObject::CreateDimReducObject(embeddings = consensus.pca,
-                                                 key = "consensuspca_", assay = "ATAC")
+                                                 key = "consensuspca_")
 
   return(obj)
 }
@@ -78,7 +78,7 @@ GetMultiCCA=function(obj, reduction.list,
   colnames(cc_pca)=paste0('ccpca_',1:ncol(cc_pca))
 
   obj[["multicca.pca"]] <- SeuratObject::CreateDimReducObject(embeddings = cc_pca,
-                                                key = "multiccapca_", assay = "ATAC")
+                                                key = "multiccapca_")
   return(obj)
 }
 
