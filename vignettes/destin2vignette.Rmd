@@ -1,0 +1,453 @@
+---
+title: "Destin2"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Destin2}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>"
+)
+```
+
+```{r, setup, message = F}
+library(Destin2)
+library(Signac)
+library(Seurat)
+library(GenomeInfoDb)
+library(EnsDb.Hsapiens.v75)
+library(BSgenome.Hsapiens.UCSC.hg19)
+library(TFBSTools)
+library(JASPAR2020)
+library(cisTopic)
+library(mogsa)
+library(ggplot2)
+library(patchwork)
+library(clustree)
+library(slingshot)
+```
+
+## Installation
+
+To install Destin2, run:
+
+```{r, eval = F}
+devtools::install_github("yuchaojiang/Destin2")
+```
+
+# Introduction
+
+This vignette will demonstrate the utility of the Destin2 package through analysis of a single-cell ATAC-seq dataset of
+human peripheral blood mononuclear cells (PBMCs) provided by 10x Genomics. Links to the raw data as well as code used for pre-processing and Signac-based downstream analysis can be found on the corresponding [Signac vignette](https://stuartlab.org/signac/articles/pbmc_vignette.html). For brevity, we omit the details here; we encourage the invested reader to examine the Signac vignette.
+
+First, we load in the peak/cell matrix and cell metadata and perform quality control pre-processing.
+
+
+```{r, warning = F, message = F}
+set.seed(1234)
+#############################################
+#############################################
+##
+##              Pre-processing
+##
+#############################################
+#############################################
+
+#Reference genome
+genome=BSgenome.Hsapiens.UCSC.hg19
+ensdb=EnsDb.Hsapiens.v75
+
+
+# load the RNA and ATAC data
+counts <- Read10X_h5("../data/atac_v1_pbmc_10k_filtered_peak_bc_matrix.h5")
+metadata <- read.csv(
+  file = "../data/atac_v1_pbmc_10k_singlecell.csv",
+  header = TRUE,
+  row.names = 1
+)
+fragpath <- "../data/atac_v1_pbmc_10k_fragments.tsv.gz"
+
+chrom_assay <- CreateChromatinAssay(
+  counts = counts,
+  sep = c(":", "-"),
+  genome = 'hg19',
+  fragments = fragpath,
+  min.cells = 10,
+  min.features = 200
+)
+
+pbmc <- CreateSeuratObject(
+  counts = chrom_assay,
+  assay = "peaks",
+  meta.data = metadata
+)
+
+# get gene annotationsg
+annotations <- GetGRangesFromEnsDb(ensdb = ensdb)
+seqlevelsStyle(annotations) <- "UCSC"
+Annotation(pbmc) <- annotations
+
+
+pbmc <- NucleosomeSignal(pbmc)
+pbmc <- TSSEnrichment(pbmc, fast = F)
+
+pbmc$pct_reads_in_peaks <- pbmc$peak_region_fragments / pbmc$passed_filters * 100
+pbmc$blacklist_ratio <- pbmc$blacklist_region_fragments / pbmc$peak_region_fragments
+pbmc$high.tss <- ifelse(pbmc$TSS.enrichment > 2, 'High', 'Low')
+pbmc$nucleosome_group <- ifelse(pbmc$nucleosome_signal > 4, 'NS > 4', 'NS < 4')
+
+pbmc <- subset(
+  x = pbmc,
+  subset = peak_region_fragments > 3000 &
+    peak_region_fragments < 20000 &
+    pct_reads_in_peaks > 15 &
+    blacklist_ratio < 0.05 &
+    nucleosome_signal < 4 &
+    TSS.enrichment > 2
+)
+
+```
+
+Next, we normalize and reduce the peak/cell matrix using latent semantic indexing (LSI), followed by graph-based clustering.
+
+```{r, warning = F, message = F}
+
+#############################################
+#############################################
+##
+##              Peak matrix processing
+##
+#############################################
+#############################################
+pbmc <- RunTFIDF(pbmc)
+pbmc <- FindTopFeatures(pbmc, min.cutoff = 'q0')
+pbmc <- RunSVD(pbmc) # This by default returns an lsi reduction
+
+pbmc <- FindNeighbors(object = pbmc, reduction = 'lsi', dims = 2:30)
+pbmc <- FindClusters(object = pbmc, verbose = FALSE, algorithm = 3)
+
+```
+
+
+The second unimodal analysis method will be a gene activity matrix derived from this scATAC-seq data. Here we use the GeneActivity function provided by Signac; we note that there exist alternatives such as [MAESTRO](https://baigal628.github.io/MAESTRO_documentation/) that could also be used.
+
+```{r, warning = F, message = F}
+#############################################
+#############################################
+##
+##              Gene activity processing
+##
+#############################################
+#############################################
+
+# To create a gene activity matrix, we extract gene coordinates 
+# and extend them to include the 2 kb upstream region (as promoter 
+# accessibility is often correlated with gene expression). We then 
+# count the number of fragments for each cell that map to each of 
+# these regions, using the using the FeatureMatrix() function. 
+
+gene.activities <- GeneActivity(pbmc)
+# This can be substituted with MAESTRO's regulatory potential model
+
+# add the gene activity matrix to the Seurat object as a new assay and normalize it
+pbmc[['RNA']] <- CreateAssayObject(counts = gene.activities)
+pbmc <- NormalizeData(
+  object = pbmc,
+  assay = 'RNA',
+  normalization.method = 'LogNormalize',
+  scale.factor = median(pbmc$nCount_RNA)
+)
+
+```
+
+For downstream analysis, we reduce the dimension of his matrix using PCA.
+
+```{r, warning = F, message = F}
+DefaultAssay(pbmc) <- 'RNA'
+
+pbmc <- FindVariableFeatures(pbmc, selection.method = "vst", nfeatures = 2000)
+pbmc <- ScaleData(pbmc, features = rownames(pbmc))
+pbmc <- RunPCA(pbmc, features = VariableFeatures(pbmc), 
+               reduction.name = 'activity.pca',  reduction.key = 'activitypca_', verbose = FALSE)
+
+```
+
+Downstream analysis oftentimes makes use of transferred cell type labels. We follow the procedure outlined in the Signac vignette.
+
+```{r, warning = F, message = F}
+pbmc_rna <- readRDS("../data/pbmc_10k_v3.rds")
+
+transfer.anchors <- FindTransferAnchors(
+  reference = pbmc_rna,
+  query = pbmc,
+  reduction = 'cca'
+)
+
+predicted.labels <- TransferData(
+  anchorset = transfer.anchors,
+  refdata = pbmc_rna$celltype,
+  weight.reduction = pbmc[['lsi']],
+  dims = 2:30
+)
+
+pbmc <- AddMetaData(object = pbmc, metadata = predicted.labels)
+pbmc <- subset(pbmc, idents = 14, invert = TRUE)
+pbmc <- RenameIdents(
+  object = pbmc,
+  '0' = 'CD14 Mono',
+  '1' = 'CD4 Memory',
+  '2' = 'CD8 Effector',
+  '3' = 'CD4 Naive',
+  '4' = 'CD14 Mono',
+  '5' = 'DN T',
+  '6' = 'CD8 Naive',
+  '7' = 'NK CD56Dim',
+  '8' = 'pre-B',
+  '9' = 'CD16 Mono',
+  '10' = 'pro-B',
+  '11' = 'DC',
+  '12' = 'NK CD56bright',
+  '13' = 'pDC'
+)
+
+pbmc$seurat_clusters=droplevels(pbmc$seurat_clusters)
+
+# Remove cells with low label-transfer scores
+pbmc=subset(pbmc, cells=which(pbmc$prediction.score.max>0.8))
+
+# Remove cells that are predicted extremely rarely
+table(pbmc$predicted.id)
+pbmc=subset(pbmc, cells=which(pbmc$predicted.id!='Dendritic cell'))
+```
+
+Next, we compute a cell by motif activity matrix using [chromVAR](https://greenleaflab.github.io/chromVAR/index.html). Full details of the method can be found [in the corresponding paper](https://www.nature.com/articles/nmeth.4401).
+
+```{r, warning = F, message = F}
+#############################################
+#############################################
+##
+##              Motif score
+##
+#############################################
+#############################################
+
+# Get a list of motif position frequency matrices from the JASPAR database
+pfm <- getMatrixSet(
+  x = JASPAR2020,
+  opts = list(collection = "CORE", tax_group = 'vertebrates', all_versions = FALSE)
+)
+
+# add motif information
+DefaultAssay(pbmc)='peaks'
+pbmc <- AddMotifs(
+  object = pbmc,
+  genome = genome,
+  pfm = pfm
+)
+
+# Computing motif activities
+pbmc <- RunChromVAR(
+  object = pbmc,
+  genome = genome,
+  new.assay.name = 'MOTIF'
+)
+```
+
+Similarly, we reduce this cell by motif matrix using PCA.
+
+```{r, warning = F, message = F}
+DefaultAssay(pbmc) <- 'MOTIF'
+#Using PCA dimensional reduction on motif modality and put it into Seurat Object
+#Choice of 50 PCs here is arbitrary
+pca_motif<-prcomp(t(pbmc@assays[["MOTIF"]]@data))$x[,1:50]
+pbmc[["motif.pca"]] <- CreateDimReducObject(embeddings = pca_motif, key = "motifpca_", assay = "MOTIF")
+
+```
+
+The final unimodal analysis we will consider is topic modeling using [cisTopic](https://github.com/aertslab/cisTopic). Full details for the method can be found on their github. We note that the number of topics chosen as well as other computing parameters were chosen based on the computing power at hand; one may need to adjust these as needed based on individual computing capabilities.
+
+```{r, warning = F, message = F}
+#############################################
+#############################################
+##
+##              cisTopic LDA
+##
+#############################################
+#############################################
+
+DefaultAssay(pbmc) <- 'peaks'
+temp = pbmc@assays$peaks@counts
+rownames(temp)=GRangesToString(pbmc@assays$peaks@ranges, sep=c(':','-'))
+cisTopicpbmc = createcisTopicObject(count.matrix = temp)
+rm(temp)
+
+cisTopicObject <- runWarpLDAModels(cisTopicpbmc, topic=c(5, 10, 20, 25, 30, 40), seed=987, nCores=6, iterations = 500, addModels=FALSE)
+cisTopicObject <- selectModel(cisTopicObject, type = 'derivative')
+cisTopicObject <- runUmap(cisTopicObject, target='cell', seed=123, method='Probability')
+
+dim(cisTopicObject@selected.model$topics)
+dim(cisTopicObject@selected.model$document_expects)
+
+pbmc[['lda']] <- CreateDimReducObject(embeddings = t(cisTopicObject@selected.model$document_expects), key = "lda_", assay = "peaks")
+
+```
+
+Destin2 offers three options for cross-modality integration: consensus PCA, multiple CCA, and weighted nearest neighbor. These are implemented in the functions `GetConsensusPCA`, `GetMultiCCA`, and `FindMultiModalNeighbors` from the Seurat V4 package.
+
+`GetConsensusPCA` and `GetMultiCCA` have a similar set of main parameters:
+
+ * `obj`: Seurat object
+ * `reduction.list`: List of dimensional reduction objects within obj
+ * `dims.list`: Dimensions of reduction objects to use for the joint dimension reduction
+ * `reduction.name`: Name of resulting joint dimension object, to be stored in obj
+ * `reduction.key`: Prefix for resulting joint dimension object
+
+```{r, warning = F, message = F}
+
+## list of dimensional reduction objects in pbmc
+reductions <- list('lsi','lda','activity.pca','motif.pca')
+## dimensions to use for each dimensionality reduction object; we choose 30 for this demonstration
+## we drop first PC from lsi based on correlation with sequencing depth
+reduction_dims <- list(2:31, 1:30, 1:30, 1:30)
+
+pbmc <- GetConsensusPCA(pbmc, reduction.list=reductions,
+                  dims.list = reduction_dims,
+                  reduction.name = 'consensus.pca',
+                  reduction.key = "consensuspca_", 
+                  assay = "peaks")
+
+pbmc <- GetMultiCCA(pbmc, reduction.list=reductions,
+                         dims.list = reduction_dims,
+                         reduction.name = 'multicca.pca',
+                         reduction.key = "multiccapca_",
+                         assay = "peaks")
+
+pbmc <- FindMultiModalNeighbors(pbmc, reduction.list=reductions,
+                                 dims.list = reduction_dims, verbose=FALSE)
+
+pbmc
+```
+
+We demonstrate the utility of the cross-modality framework that Destin2 offers through graph-based clustering and non-linear dimension reduction and visualization using UMAP. 
+
+```{r, fig.show='hold', fig.align='center'}
+
+########################
+#### Consensus PCA
+########################
+pbmc <- RunUMAP(pbmc, dims = 1:30, reduction='consensus.pca', 
+               reduction.name='consensus.umap', reduction.key = 'consensusumap_', verbose = FALSE)
+
+DefaultAssay(pbmc)='peaks'
+pbmc <- FindNeighbors(object = pbmc, reduction = 'consensus.pca', dims = 1:30, verbose = FALSE, graph.name=c('consensuspca_nn','consensuspca_snn'))
+pbmc <- FindClusters(object = pbmc, algorithm = 1, verbose = FALSE, graph.name='consensuspca_snn')
+  
+pbmc$consensus_clusters=pbmc$seurat_clusters
+p1=DimPlot(object = pbmc, group.by='consensus_clusters', label = TRUE, reduction = 'consensus.umap') + NoLegend()+ggtitle('Consensus PCA')
+p2=DimPlot(object = pbmc, group.by='predicted.id', label = TRUE, reduction = 'consensus.umap') + NoLegend()+ggtitle('Consensus PCA')
+p1+p2
+
+########################
+#### MultiCCA
+########################
+pbmc <- RunUMAP(pbmc, dims = 1:30, reduction='multicca.pca', 
+               reduction.name='multicca.umap', reduction.key = 'multiccaumap_', verbose = FALSE)
+pbmc <- FindNeighbors(object = pbmc, reduction = 'multicca.pca', dims = 1:30, verbose = FALSE, graph.name=c('multicca_nn','multicca_snn'))
+pbmc <- FindClusters(object = pbmc, algorithm = 1, verbose = FALSE, graph.name='multicca_snn')
+  
+pbmc$cc_clusters = pbmc$seurat_clusters
+p1=DimPlot(object = pbmc, label = TRUE, group.by='cc_clusters',reduction = 'multicca.umap') + NoLegend()+ggtitle('MultiCCA')
+p2=DimPlot(object = pbmc, group.by='predicted.id',label = TRUE, reduction = 'multicca.umap') + NoLegend() +ggtitle('MultiCCA')
+p1+p2
+
+  
+########################
+#### Weighted NN
+########################
+
+pbmc <- RunUMAP(pbmc, nn.name = "weighted.nn", reduction.name = "wnn.umap", reduction.key = "wnnUMAP_")
+pbmc <- FindClusters(pbmc, graph.name = "wsnn", algorithm = 3, resolution = 2, verbose = FALSE)
+pbmc$wnn_clusters = pbmc$seurat_clusters
+
+p1=DimPlot(object = pbmc, label = TRUE, group.by='wnn_clusters',reduction = 'wnn.umap') + NoLegend()+ggtitle('WNN')
+p2=DimPlot(object = pbmc, group.by='predicted.id',label = TRUE, reduction = 'wnn.umap') + NoLegend() +ggtitle('WNN')
+p1+p2
+
+```
+
+For further clustering inference, the [clustree](https://github.com/lazappi/clustree) allows us to build clustering trees and measure the stability of clusters as resolution increases.
+
+```{r, fig.show='hold', fig.align='center'}
+
+#########################################################
+  ##  clustree to determine the number of clusters / resolution
+  #########################################################
+
+  resolution.range <- seq(from = 0.2, to = 1.2, by = 0.2)
+  pbmc <- FindClusters(object = pbmc, algorithm = 1, verbose = FALSE, resolution = resolution.range, graph.name='consensuspca_snn')
+  pbmc.cpca.clustree=clustree(pbmc, prefix = 'consensuspca_snn_res.')
+  p1=pbmc.cpca.clustree
+  # The stability index from the SC3 package (Kiselev et al. 2017) measures the stability of clusters across resolutions.
+  # The stability index is automatically calculated when a clustering tree is built.
+  pbmc.cpca.clustree=clustree(pbmc, prefix = 'consensuspca_snn_res.', node_colour = "sc3_stability")
+  p2=pbmc.cpca.clustree
+  p1+p2
+  
+  resolution.range <- seq(from = 0.2, to = 1.2, by = 0.2)
+  pbmc <- FindClusters(object = pbmc, algorithm = 1, verbose = FALSE, resolution = resolution.range, graph.name='multicca_snn')
+  pbmc.mcca.clustree=clustree(pbmc, prefix = 'multicca_snn_res.')
+  p1=pbmc.mcca.clustree
+  pbmc.mcca.clustree=clustree(pbmc, prefix = 'multicca_snn_res.', node_colour = "sc3_stability")
+  p2=pbmc.mcca.clustree
+  p1+p2
+  
+  resolution.range <- seq(from = 0.2, to = 1.2, by = 0.2)
+  pbmc <- FindClusters(object = pbmc, algorithm = 1, resolution = resolution.range, verbose = FALSE, graph.name = "wsnn")
+  pbmc.wnn.clustree=clustree(pbmc, prefix = 'wsnn_res.')
+  p1=pbmc.wnn.clustree
+  pbmc.wnn.clustree=clustree(pbmc, prefix = 'wsnn_res.', node_colour = "sc3_stability")
+  p2=pbmc.wnn.clustree
+  p1+p2
+  
+  
+```
+
+The final part of our analysis uses the [Slingshot](https://bmcgenomics.biomedcentral.com/articles/10.1186/s12864-018-4772-0) package to perform trajectory inference. The `GetSlingshot` function provides a convenient wrapper to this package. [A vignette on Slingshot can be found here.](https://bioconductor.org/packages/devel/bioc/vignettes/slingshot/inst/doc/vignette.html)
+
+`GetSlingshot` takes the following parameters:
+
+ * `obj`: Seurat object
+ * `reduction.to.construct`: Dimension reduction object used to infer lineages
+ * `reduction.to.plot`: Dimension reduction object used to cluster centroids and plot lineages
+ * `cluster`: Vector of cluster identity for each sample
+ * `predicted.id`: String specifying (transferred) cell labels
+ * `generate.plot`: If true, returns Slingshot plots
+
+
+```{r, fig.show='hold', fig.align='center'}
+CPCALineages <- GetSlingshot(pbmc, reduction.to.construct = 'consensus.pca',
+                      reduction.to.plot='consensus.umap',
+                      cluster='consensus_clusters', 
+                      predicted.id='predicted.id',
+                      generate.plot = TRUE)
+CPCALineages
+
+MCCALineages <- GetSlingshot(pbmc, reduction.to.construct = 'multicca.pca',
+                      reduction.to.plot='multicca.umap',
+                      cluster='cc_clusters', 
+                      predicted.id='predicted.id',
+                      generate.plot = TRUE)
+MCCALineages
+
+```
+
+```{r message=FALSE, warning=FALSE, echo=FALSE}
+saveRDS(object = pbmc, file = "../data/pbmc.rds")
+```
+
+
+
