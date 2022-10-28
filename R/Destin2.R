@@ -1,19 +1,22 @@
 #' Consensus PCA of Seurat
 #'
-#' This function takes a Seurat object and returns consensus PCA (CPCA) as joint dimension reduction
+#' This function takes a Seurat object and conducts consensus principal component analysis (CPCA) as joint dimension reduction
 #'
-#' @param obj a Seurat object
-#' @param reduction.list a list of of dimensional reduction objects within obj
-#' @param reduction.name a character providing the name of the CPCA dimension reduction
-#' @param reduction.key a character string that acts as a prefix for the CPCA dimension reduction
-#' @param n.consensus.pc Number of PC's to store
+#' @param obj Seurat object
+#' @param reduction.list A list of of dimension reduction objects within obj
+#' @param dims.list A list of which dimensions to use for each combined dimension reduction object
+#' @param assay A character string specifying the assay used to calculate this dimensional reduction
+#' @param reduction.name A character string providing the name of the CPCA dimension reduction
+#' @param reduction.key A character string that acts as a prefix for the CPCA dimension reduction
+#' @param n.consensus.pc Number of principal components (PC's) to store
 #'
-#' @return a Seurat object containing CPCA joint dimension reduction
+#' @return A Seurat object containing CPCA joint dimension reduction in slot "consensus.pca"
 #'
 #' @importFrom SeuratObject CreateDimReducObject
 #' @export
 GetConsensusPCA=function(obj, reduction.list,
                          dims.list,
+                         assay = NULL,
                          reduction.name=NULL,
                          reduction.key=NULL,
                          n.consensus.pc=NULL){
@@ -35,28 +38,31 @@ GetConsensusPCA=function(obj, reduction.list,
   colnames(consensus.pca)=paste0('consensuspca_',1:n.consensus.pc)
 
   obj[["consensus.pca"]] <- SeuratObject::CreateDimReducObject(embeddings = consensus.pca,
-                                                 key = "consensuspca_")
+                                                 key = "consensuspca_", assay = assay)
 
   return(obj)
 }
 
 #' MultiCCA of Seurat
 #'
-#' This function takes a Seurat object and returns multiple canonical correlation analysis (MCCA) as joint dimension reduction
+#' This function takes a Seurat object and conducts multiple canonical correlation analysis (MCCA) as joint dimension reduction
 #'
-#' @param obj a Seurat object
-#' @param reduction.list a list of of dimensional reduction objects within obj
-#' @param reduction.name a character providing the name of the MCCA dimension reduction
-#' @param reduction.key a character string that acts as a prefix for the MCCA dimension reduction
-#' @param n.consensus.pc Number of PC's to store
+#' @param obj Seurat object
+#' @param reduction.list A list of of dimension reduction objects within obj
+#' @param dims.list A list of which dimensions to use for each combined dimension reduction object
+#' @param assay A character string specifying the assay used to calculate this dimensional reduction
+#' @param reduction.name A character string providing the name of the MCCA dimension reduction
+#' @param reduction.key A character string that acts as a prefix for the MCCA dimension reduction
+#' @param n.consensus.pc Number of principal components (PC's) to store
 #'
-#' @return a Seurat object containing MCCA joint dimension reduction
+#' @return A Seurat object containing MCCA joint dimension reduction in slot "multicca.pca"
 #'
 #' @importFrom SeuratObject CreateDimReducObject
 #' @importFrom mogsa mbpca
 #' @export
 GetMultiCCA=function(obj, reduction.list,
                      dims.list,
+                     assay = NULL,
                      reduction.name=NULL,
                      reduction.key=NULL,
                      n.cca=NULL){
@@ -78,7 +84,7 @@ GetMultiCCA=function(obj, reduction.list,
   colnames(cc_pca)=paste0('ccpca_',1:ncol(cc_pca))
 
   obj[["multicca.pca"]] <- SeuratObject::CreateDimReducObject(embeddings = cc_pca,
-                                                key = "multiccapca_")
+                                                key = "multiccapca_", assay = assay)
   return(obj)
 }
 
@@ -86,19 +92,18 @@ GetMultiCCA=function(obj, reduction.list,
 #'
 #' This function takes a Seurat object and displays trajectory inference using Slingshot
 #'
-#' @param obj a Seurat object
-#' @param reduction.to.construct a character string specifying dimension reduction object used to infer lineages
-#' @param reduction.to.plot a character string specfiying dimension reduction object to cluster centroids and plot lineages
-#' @param cluster a vector specifying cluster identity for each sample
-#' @param predicted.id a character string specifying (transferred) cell labels
-#' @param generate.plot a boolean, if true returns Slingshot plots based on cluster and predicted.id
+#' @param obj A Seurat object
+#' @param reduction.to.construct A character string specifying dimension reduction object used to infer lineages
+#' @param reduction.to.plot A character string specifying dimension reduction object to cluster centroids and plot lineages
+#' @param cluster A vector specifying cluster identity for each sample
+#' @param predicted.id A character string specifying (transferred) cell labels
+#' @param generate.plot If true returns Slingshot plots based on cluster and predicted.id
 #'
 #' @return Slingshot Lineages
 #'
 #' @importFrom SeuratObject CreateDimReducObject
 #' @import Seurat
-#' @importFrom slingshot SlingshotDataSet
-#' @importFrom slingshot getLineages
+#' @import slingshot
 #' @import ggplot2
 #' @export
 GetSlingshot=function(obj, reduction.to.construct, reduction.to.plot, cluster,
@@ -153,7 +158,4 @@ GetSlingshot=function(obj, reduction.to.construct, reduction.to.plot, cluster,
   }
   return(SlingshotLineages)
 }
-
-
-
 
