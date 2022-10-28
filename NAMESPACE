@@ -3,7 +3,6 @@
 export(GetConsensusPCA)
 export(GetMultiCCA)
 export(GetSlingshot)
-import(DimPlot)
 import(Seurat)
 import(ggplot2)
 importFrom(SeuratObject,CreateDimReducObject)
