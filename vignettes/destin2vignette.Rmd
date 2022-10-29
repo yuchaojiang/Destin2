@@ -1,18 +1,27 @@
 ---
-title: "Destin2"
-output: rmarkdown::html_vignette
-vignette: >
-  %\VignetteIndexEntry{Destin2}
-  %\VignetteEngine{knitr::rmarkdown}
-  %\VignetteEncoding{UTF-8}
+title: "Destin2 Vignette"
+output: html_document
+date: 'Compiled: `r format(Sys.Date(), "%B %d, %Y")`'
 ---
-
-```{r, include = FALSE}
-knitr::opts_chunk$set(
-  collapse = TRUE,
-  comment = "#>"
-)
+  
+```{r init, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE)
 ```
+
+## Installation
+
+To install Destin2, run:
+
+```{r, eval = F}
+devtools::install_github("yuchaojiang/Destin2")
+```
+
+## Introduction
+
+This vignette will demonstrate the utility of the Destin2 package through analysis of a single-cell ATAC-seq dataset of
+human peripheral blood mononuclear cells (PBMCs) provided by 10x Genomics. Links to the raw data as well as code used for pre-processing and Signac-based downstream analysis can be found on the corresponding [Signac vignette](https://stuartlab.org/signac/articles/pbmc_vignette.html). For brevity, we omit the details here; we encourage the invested reader to examine the Signac vignette.
+
+First, we load in Destin2 as well as the other we will be using for this vignette.
 
 ```{r, setup, message = F}
 library(Destin2)
@@ -31,18 +40,8 @@ library(clustree)
 library(slingshot)
 ```
 
-## Installation
+## QC and Pre-Processing
 
-To install Destin2, run:
-
-```{r, eval = F}
-devtools::install_github("yuchaojiang/Destin2")
-```
-
-# Introduction
-
-This vignette will demonstrate the utility of the Destin2 package through analysis of a single-cell ATAC-seq dataset of
-human peripheral blood mononuclear cells (PBMCs) provided by 10x Genomics. Links to the raw data as well as code used for pre-processing and Signac-based downstream analysis can be found on the corresponding [Signac vignette](https://stuartlab.org/signac/articles/pbmc_vignette.html). For brevity, we omit the details here; we encourage the invested reader to examine the Signac vignette.
 
 First, we load in the peak/cell matrix and cell metadata and perform quality control pre-processing.
 
@@ -112,7 +111,11 @@ pbmc <- subset(
 
 ```
 
-Next, we normalize and reduce the peak/cell matrix using latent semantic indexing (LSI), followed by graph-based clustering.
+## Unimodal Analyses
+
+Destin2 provides methods for conducting and integrating cross-modality analyses. In order to do so, we consider the following unimodal analyses. 
+
+The first analysis method will be to normalize and reduce the peak/cell matrix using latent semantic indexing (LSI), followed by graph-based clustering.
 
 ```{r, warning = F, message = F}
 
@@ -270,7 +273,7 @@ pbmc[["motif.pca"]] <- CreateDimReducObject(embeddings = pca_motif, key = "motif
 
 The final unimodal analysis we will consider is topic modeling using [cisTopic](https://github.com/aertslab/cisTopic). Full details for the method can be found on their github. We note that the number of topics chosen as well as other computing parameters were chosen based on the computing power at hand; one may need to adjust these as needed based on individual computing capabilities.
 
-```{r, warning = F, message = F}
+```{r, warning = F, message = F, fig.show='hide'}
 #############################################
 #############################################
 ##
@@ -295,6 +298,9 @@ dim(cisTopicObject@selected.model$document_expects)
 pbmc[['lda']] <- CreateDimReducObject(embeddings = t(cisTopicObject@selected.model$document_expects), key = "lda_", assay = "peaks")
 
 ```
+
+## Cross-Modality Analyses
+
 
 Destin2 offers three options for cross-modality integration: consensus PCA, multiple CCA, and weighted nearest neighbor. These are implemented in the functions `GetConsensusPCA`, `GetMultiCCA`, and `FindMultiModalNeighbors` from the Seurat V4 package.
 
@@ -334,7 +340,7 @@ pbmc
 
 We demonstrate the utility of the cross-modality framework that Destin2 offers through graph-based clustering and non-linear dimension reduction and visualization using UMAP. 
 
-```{r, fig.show='hold', fig.align='center'}
+```{r, fig.width=12, fig.height=10}
 
 ########################
 #### Consensus PCA
@@ -381,7 +387,7 @@ p1+p2
 
 For further clustering inference, the [clustree](https://github.com/lazappi/clustree) allows us to build clustering trees and measure the stability of clusters as resolution increases.
 
-```{r, fig.show='hold', fig.align='center'}
+```{r, fig.width=12, fig.height=10}
 
 #########################################################
   ##  clustree to determine the number of clusters / resolution
@@ -428,7 +434,7 @@ The final part of our analysis uses the [Slingshot](https://bmcgenomics.biomedce
  * `generate.plot`: If true, returns Slingshot plots
 
 
-```{r, fig.show='hold', fig.align='center'}
+```{r, fig.width=12, fig.height=10}
 CPCALineages <- GetSlingshot(pbmc, reduction.to.construct = 'consensus.pca',
                       reduction.to.plot='consensus.umap',
                       cluster='consensus_clusters', 
