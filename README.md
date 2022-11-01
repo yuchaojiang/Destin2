@@ -21,8 +21,7 @@ devtools::install_github("yuchaojiang/Destin2")
 ```
 
 ## Vignettes
-
-[PBMC scATAC-seq by 10x Genomics](http://htmlpreview.github.io/?https://github.com/yuchaojiang/Destin2/blob/main/vignettes/destin2vignette.html)
+[PBMC scATAC-seq by 10x Genomics](http://htmlpreview.github.io/?https://github.com/yuchaojiang/Destin2/blob/main/package/vignettes/destin2vignette.html)
 
 
 ## Issues & bugs
