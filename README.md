@@ -1,5 +1,4 @@
-# Destin2
-Integrative and cross-modality analysis of single-cell chromatin accessibility data
+# Destin2: Integrative and cross-modality analysis of single-cell chromatin accessibility data
 
 ## Author
 Peter Guan, Andy Lee, Lihao Wang, Yuchao Jiang
