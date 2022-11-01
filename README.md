@@ -22,20 +22,16 @@ devtools::install_github("yuchaojiang/Destin2")
 
 ## Vignettes
 
-[Destin2 - 10X PBMC](http://htmlpreview.github.io/?https://github.com/yuchaojiang/Destin2/blob/main/vignettes/destin2vignette.html)
+[PBMC scATAC-seq by 10x Genomics](http://htmlpreview.github.io/?https://github.com/yuchaojiang/Destin2/blob/main/vignettes/destin2vignette.html)
 
 
 ## Issues & bugs
 
 Please do not email but post [here](https://github.com/yuchaojiang/Destin2/issues) on GitHub for fastest reply or assistance.
 
-##  Common questions
-
-To do
 
 ##  Manuscript code
 
-To do
-
 ## Reference
-To-do
+Guan PY, Lee AJ, Wang L, Lin KZ, Wen M, Jiang Y. Destin2: integrative and cross-modality analysis of single-cell chromatin accessibility data. bioRxiv, 2022.
+
