@@ -17,7 +17,7 @@ Destin2 is a statistical framework for cross-modality dimension reduction, clust
 ## Installation
 ```r
 install.packages("devtools")
-devtools::install_github("yuchaojiang/Destin2")
+devtools::install_github("yuchaojiang/Destin2/package")
 ```
 
 ## Vignettes
