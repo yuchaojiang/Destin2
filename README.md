@@ -2,7 +2,7 @@
 Integrative and cross-modality analysis of single-cell chromatin accessibility data
 
 ## Author
-Peter Guan, Yuchao Jiang
+Peter Guan, Andy Lee, Lihao Wang, Yuchao Jiang
 
 ## Maintainer
 Peter Guan pyg at email dot unc dot edu
