@@ -21,6 +21,7 @@ devtools::install_github("yuchaojiang/Destin2/package")
 
 ## Vignettes
 [PBMC scATAC-seq by 10x Genomics](http://htmlpreview.github.io/?https://github.com/yuchaojiang/Destin2/blob/main/package/vignettes/destin2vignette.html)
+
 Mouse brain scATAC-seq by 10x Genomics
 
 ## Issues & bugs
