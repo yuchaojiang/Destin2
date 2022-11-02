@@ -13,7 +13,7 @@ knitr::opts_chunk$set(echo = TRUE, warning = FALSE)
 To install Destin2, run:
 
 ```{r, eval = F}
-devtools::install_github("yuchaojiang/Destin2")
+devtools::install_github("yuchaojiang/Destin2/package")
 ```
 
 ## Introduction
@@ -21,7 +21,7 @@ devtools::install_github("yuchaojiang/Destin2")
 This vignette will demonstrate the utility of the Destin2 package through analysis of a single-cell ATAC-seq dataset of
 human peripheral blood mononuclear cells (PBMCs) provided by 10x Genomics. Links to the raw data as well as code used for pre-processing and Signac-based downstream analysis can be found on the corresponding [Signac vignette](https://stuartlab.org/signac/articles/pbmc_vignette.html). For brevity, we omit the details here; we encourage the invested reader to examine the Signac vignette.
 
-First, we load in Destin2 as well as the other we will be using for this vignette.
+First, we load in Destin2 as well as the other packages we will be using for this vignette.
 
 ```{r, setup, message = F}
 library(Destin2)
@@ -42,24 +42,19 @@ library(slingshot)
 
 ## QC and Pre-Processing
 
+Next, we load in the peak/cell matrix and cell metadata and perform quality control pre-processing. The following files are used in this vignette, available through 10X Genomics: 
 
-First, we load in the peak/cell matrix and cell metadata and perform quality control pre-processing.
-
+* [Raw data](https://cf.10xgenomics.com/samples/cell-atac/1.0.1/atac_v1_pbmc_10k/atac_v1_pbmc_10k_filtered_peak_bc_matrix.h5)  
+* [Metadata](https://cf.10xgenomics.com/samples/cell-atac/1.0.1/atac_v1_pbmc_10k/atac_v1_pbmc_10k_singlecell.csv)  
+* [Fragments file](https://cf.10xgenomics.com/samples/cell-atac/1.0.1/atac_v1_pbmc_10k/atac_v1_pbmc_10k_fragments.tsv.gz)
+* [Fragments file index](https://cf.10xgenomics.com/samples/cell-atac/1.0.1/atac_v1_pbmc_10k/atac_v1_pbmc_10k_fragments.tsv.gz.tbi)
 
 ```{r, warning = F, message = F}
 set.seed(1234)
-#############################################
-#############################################
-##
-##              Pre-processing
-##
-#############################################
-#############################################
 
 #Reference genome
 genome=BSgenome.Hsapiens.UCSC.hg19
 ensdb=EnsDb.Hsapiens.v75
-
 
 # load the RNA and ATAC data
 counts <- Read10X_h5("../data/atac_v1_pbmc_10k_filtered_peak_bc_matrix.h5")
@@ -118,14 +113,6 @@ Destin2 provides methods for conducting and integrating cross-modality analyses.
 The first analysis method will be to normalize and reduce the peak/cell matrix using latent semantic indexing (LSI), followed by graph-based clustering.
 
 ```{r, warning = F, message = F}
-
-#############################################
-#############################################
-##
-##              Peak matrix processing
-##
-#############################################
-#############################################
 pbmc <- RunTFIDF(pbmc)
 pbmc <- FindTopFeatures(pbmc, min.cutoff = 'q0')
 pbmc <- RunSVD(pbmc) # This by default returns an lsi reduction
@@ -139,20 +126,6 @@ pbmc <- FindClusters(object = pbmc, verbose = FALSE, algorithm = 3)
 The second unimodal analysis method will be a gene activity matrix derived from this scATAC-seq data. Here we use the GeneActivity function provided by Signac; we note that there exist alternatives such as [MAESTRO](https://baigal628.github.io/MAESTRO_documentation/) that could also be used.
 
 ```{r, warning = F, message = F}
-#############################################
-#############################################
-##
-##              Gene activity processing
-##
-#############################################
-#############################################
-
-# To create a gene activity matrix, we extract gene coordinates 
-# and extend them to include the 2 kb upstream region (as promoter 
-# accessibility is often correlated with gene expression). We then 
-# count the number of fragments for each cell that map to each of 
-# these regions, using the using the FeatureMatrix() function. 
-
 gene.activities <- GeneActivity(pbmc)
 # This can be substituted with MAESTRO's regulatory potential model
 
@@ -230,14 +203,6 @@ pbmc=subset(pbmc, cells=which(pbmc$predicted.id!='Dendritic cell'))
 Next, we compute a cell by motif activity matrix using [chromVAR](https://greenleaflab.github.io/chromVAR/index.html). Full details of the method can be found [in the corresponding paper](https://www.nature.com/articles/nmeth.4401).
 
 ```{r, warning = F, message = F}
-#############################################
-#############################################
-##
-##              Motif score
-##
-#############################################
-#############################################
-
 # Get a list of motif position frequency matrices from the JASPAR database
 pfm <- getMatrixSet(
   x = JASPAR2020,
@@ -274,14 +239,6 @@ pbmc[["motif.pca"]] <- CreateDimReducObject(embeddings = pca_motif, key = "motif
 The final unimodal analysis we will consider is topic modeling using [cisTopic](https://github.com/aertslab/cisTopic). Full details for the method can be found on their github. We note that the number of topics chosen as well as other computing parameters were chosen based on the computing power at hand; one may need to adjust these as needed based on individual computing capabilities.
 
 ```{r, warning = F, message = F, fig.show='hide'}
-#############################################
-#############################################
-##
-##              cisTopic LDA
-##
-#############################################
-#############################################
-
 DefaultAssay(pbmc) <- 'peaks'
 temp = pbmc@assays$peaks@counts
 rownames(temp)=GRangesToString(pbmc@assays$peaks@ranges, sep=c(':','-'))
@@ -311,6 +268,7 @@ Destin2 offers three options for cross-modality integration: consensus PCA, mult
  * `dims.list`: Dimensions of reduction objects to use for the joint dimension reduction
  * `reduction.name`: Name of resulting joint dimension object, to be stored in obj
  * `reduction.key`: Prefix for resulting joint dimension object
+ * `assay`: Name of assay used to calculate dimensional reduction
 
 ```{r, warning = F, message = F}
 
@@ -340,7 +298,7 @@ pbmc
 
 We demonstrate the utility of the cross-modality framework that Destin2 offers through graph-based clustering and non-linear dimension reduction and visualization using UMAP. 
 
-```{r, fig.width=12, fig.height=10}
+```{r, fig.width=12, fig.height=8}
 
 ########################
 #### Consensus PCA
@@ -434,7 +392,7 @@ The final part of our analysis uses the [Slingshot](https://bmcgenomics.biomedce
  * `generate.plot`: If true, returns Slingshot plots
 
 
-```{r, fig.width=12, fig.height=10}
+```{r, fig.width=12, fig.height=7}
 CPCALineages <- GetSlingshot(pbmc, reduction.to.construct = 'consensus.pca',
                       reduction.to.plot='consensus.umap',
                       cluster='consensus_clusters', 
@@ -455,5 +413,6 @@ MCCALineages
 saveRDS(object = pbmc, file = "../data/pbmc.rds")
 ```
 
-
-
+```{r}
+sessionInfo()
+```
