@@ -1,5 +1,5 @@
 ---
-title: "Destin2 Vignette"
+title: "Destin2 Vignette - PBMC scATAC-seq"
 output: html_document
 date: 'Compiled: `r format(Sys.Date(), "%B %d, %Y")`'
 ---
