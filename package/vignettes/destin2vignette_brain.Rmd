@@ -1,0 +1,402 @@
+---
+title: "Destin2 Vignette - Mouse Brain scATAC-seq"
+output: html_document
+date: 'Compiled: `r format(Sys.Date(), "%B %d, %Y")`'
+---
+  
+```{r init, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE)
+```
+
+## Installation
+
+To install Destin2, run:
+
+```{r, eval = F}
+devtools::install_github("yuchaojiang/Destin2/package")
+```
+
+## Introduction
+
+This vignette will demonstrate the utility of the Destin2 package through analysis of a single-cell ATAC-seq dataset of
+adult mouse brain cells provided by 10x Genomics. Links to the raw data as well as code used for pre-processing and Signac-based downstream analysis can be found on the corresponding [Signac vignette](https://stuartlab.org/signac/articles/mouse_brain_vignette.html). For brevity, we omit the details here; we encourage the invested reader to examine the Signac vignette.
+
+First, we load in Destin2 as well as the other packages we will be using for this vignette.
+
+```{r, setup, message = F}
+library(Destin2)
+library(Signac)
+library(Seurat)
+library(GenomeInfoDb)
+library(EnsDb.Mmusculus.v79)
+library(BSgenome.Mmusculus.UCSC.mm10)
+library(TFBSTools)
+library(JASPAR2020)
+library(cisTopic)
+library(mogsa)
+library(ggplot2)
+library(patchwork)
+library(clustree)
+library(slingshot)
+```
+
+## QC and Pre-Processing
+
+Next, we load in the peak/cell matrix and cell metadata and perform quality control pre-processing. The following files are used in this vignette, available through 10X Genomics: 
+
+* [Raw data](http://cf.10xgenomics.com/samples/cell-atac/1.1.0/atac_v1_adult_brain_fresh_5k/atac_v1_adult_brain_fresh_5k_filtered_peak_bc_matrix.h5)  
+* [Metadata](http://cf.10xgenomics.com/samples/cell-atac/1.1.0/atac_v1_adult_brain_fresh_5k/atac_v1_adult_brain_fresh_5k_singlecell.csv)  
+* [Fragments file](http://cf.10xgenomics.com/samples/cell-atac/1.1.0/atac_v1_adult_brain_fresh_5k/atac_v1_adult_brain_fresh_5k_fragments.tsv.gz)
+* [Fragments file index](http://cf.10xgenomics.com/samples/cell-atac/1.1.0/atac_v1_adult_brain_fresh_5k/atac_v1_adult_brain_fresh_5k_fragments.tsv.gz.tbi)
+
+```{r, warning = F, message = F}
+set.seed(1234)
+
+#Reference genome
+genome=BSgenome.Mmusculus.UCSC.mm10
+ensdb=EnsDb.Mmusculus.v79
+
+# load the RNA and ATAC data
+counts <- Read10X_h5("../data/atac_v1_adult_brain_fresh_5k_filtered_peak_bc_matrix.h5")
+metadata <- read.csv(
+  file = "../data/atac_v1_adult_brain_fresh_5k_singlecell.csv",
+  header = TRUE,
+  row.names = 1
+)
+fragpath <- "../data/atac_v1_adult_brain_fresh_5k_fragments.tsv.gz"
+
+chrom_assay <- CreateChromatinAssay(
+  counts = counts,
+  sep = c(":", "-"),
+  genome = 'mm10',
+  fragments = fragpath,
+  min.cells = 1
+)
+
+brain <- CreateSeuratObject(
+  counts = chrom_assay,
+  assay = "peaks",
+  project = 'ATAC',
+  meta.data = metadata
+)
+
+# get gene annotations
+annotations <- GetGRangesFromEnsDb(ensdb = ensdb)
+seqlevelsStyle(annotations) <- "UCSC"
+Annotation(brain) <- annotations
+
+
+brain <- NucleosomeSignal(brain)
+brain <- TSSEnrichment(brain, fast = F)
+
+brain$pct_reads_in_peaks <- brain$peak_region_fragments / brain$passed_filters * 100
+brain$blacklist_ratio <- brain$blacklist_region_fragments / brain$peak_region_fragments
+brain$high.tss <- ifelse(brain$TSS.enrichment > 2, 'High', 'Low')
+brain$nucleosome_group <- ifelse(brain$nucleosome_signal > 4, 'NS > 4', 'NS < 4')
+
+brain <- subset(
+  x = brain,
+  subset = peak_region_fragments > 3000 &
+    peak_region_fragments < 100000 &
+    pct_reads_in_peaks > 40 &
+    blacklist_ratio < 0.025 &
+    nucleosome_signal < 4 &
+    TSS.enrichment > 2
+)
+
+```
+
+## Unimodal Analyses
+
+Destin2 provides methods for conducting and integrating cross-modality analyses. In order to do so, we consider the following unimodal analyses. 
+
+The first analysis method will be to normalize and reduce the peak/cell matrix using latent semantic indexing (LSI), followed by graph-based clustering.
+
+```{r, warning = F, message = F}
+brain <- RunTFIDF(brain)
+brain <- FindTopFeatures(brain, min.cutoff = 'q0')
+brain <- RunSVD(brain) # This by default returns an lsi reduction
+
+brain <- FindNeighbors(object = brain, reduction = 'lsi', dims = 2:30)
+brain <- FindClusters(object = brain, verbose = FALSE, algorithm = 3)
+
+```
+
+
+The second unimodal analysis method will be a gene activity matrix derived from this scATAC-seq data. Here we use the GeneActivity function provided by Signac; we note that there exist alternatives such as [MAESTRO](https://baigal628.github.io/MAESTRO_documentation/) that could also be used.
+
+```{r, warning = F, message = F}
+gene.activities <- GeneActivity(brain)
+# This can be substituted with MAESTRO's regulatory potential model
+
+# add the gene activity matrix to the Seurat object as a new assay and normalize it
+brain[['RNA']] <- CreateAssayObject(counts = gene.activities)
+brain <- NormalizeData(
+  object = brain,
+  assay = 'RNA',
+  normalization.method = 'LogNormalize',
+  scale.factor = median(brain$nCount_RNA)
+)
+
+```
+
+For downstream analysis, we reduce the dimension of his matrix using PCA.
+
+```{r, warning = F, message = F}
+DefaultAssay(brain) <- 'RNA'
+
+brain <- FindVariableFeatures(brain, selection.method = "vst", nfeatures = 2000)
+brain <- ScaleData(brain, features = rownames(brain))
+brain <- RunPCA(brain, features = VariableFeatures(brain), 
+               reduction.name = 'activity.pca',  reduction.key = 'activitypca_', verbose = FALSE)
+
+```
+
+Downstream analysis oftentimes makes use of transferred cell type labels. We follow the procedure outlined in the Signac vignette.
+
+```{r, warning = F, message = F}
+allen_rna <- readRDS("../data/allen_brain.rds")
+
+transfer.anchors <- FindTransferAnchors(
+  reference = allen_rna,
+  query = brain,
+  reduction = 'cca',
+  dims = 1:40
+)
+
+predicted.labels <- TransferData(
+  anchorset = transfer.anchors,
+  refdata = allen_rna$subclass,
+  weight.reduction = brain[['lsi']],
+  dims = 2:30
+)
+
+brain <- AddMetaData(object = brain, metadata = predicted.labels)
+
+for(i in levels(brain)) {
+  cells_to_reid <- WhichCells(brain, idents = i)
+  newid <- names(sort(table(brain$predicted.id[cells_to_reid]),decreasing=TRUE))[1]
+  Idents(brain, cells = cells_to_reid) <- newid
+}
+
+# Remove cells with low label-transfer scores
+brain=subset(brain, cells=which(brain$prediction.score.max>0.8))
+```
+
+Next, we compute a cell by motif activity matrix using [chromVAR](https://greenleaflab.github.io/chromVAR/index.html). Full details of the method can be found [in the corresponding paper](https://www.nature.com/articles/nmeth.4401).
+
+```{r, warning = F, message = F}
+# Get a list of motif position frequency matrices from the JASPAR database
+pfm <- getMatrixSet(
+  x = JASPAR2020,
+  opts = list(collection = "CORE", tax_group = 'vertebrates', all_versions = FALSE)
+)
+
+# add motif information
+DefaultAssay(brain)='peaks'
+brain <- AddMotifs(
+  object = brain,
+  genome = genome,
+  pfm = pfm
+)
+
+# Computing motif activities
+brain <- RunChromVAR(
+  object = brain,
+  genome = genome,
+  new.assay.name = 'MOTIF'
+)
+```
+
+Similarly, we reduce this cell by motif matrix using PCA.
+
+```{r, warning = F, message = F}
+DefaultAssay(brain) <- 'MOTIF'
+#Using PCA dimensional reduction on motif modality and put it into Seurat Object
+#Choice of 50 PCs here is arbitrary
+pca_motif<-prcomp(t(brain@assays[["MOTIF"]]@data))$x[,1:50]
+brain[["motif.pca"]] <- CreateDimReducObject(embeddings = pca_motif, key = "motifpca_", assay = "MOTIF")
+
+```
+
+The final unimodal analysis we will consider is topic modeling using [cisTopic](https://github.com/aertslab/cisTopic). Full details for the method can be found on their github. We note that the number of topics chosen as well as other computing parameters were chosen based on the computing power at hand; one may need to adjust these as needed based on individual computing capabilities.
+
+```{r, warning = F, message = F, fig.show='hide'}
+DefaultAssay(brain) <- 'peaks'
+temp = brain@assays$peaks@counts
+rownames(temp)=GRangesToString(brain@assays$peaks@ranges, sep=c(':','-'))
+cisTopicbrain = createcisTopicObject(count.matrix = temp)
+rm(temp)
+
+cisTopicObject <- runWarpLDAModels(cisTopicbrain, topic=c(5, 10, 20, 25, 30, 40), seed=987, nCores=6, iterations = 500, addModels=FALSE)
+cisTopicObject <- selectModel(cisTopicObject, type = 'derivative')
+cisTopicObject <- runUmap(cisTopicObject, target='cell', seed=123, method='Probability')
+
+dim(cisTopicObject@selected.model$topics)
+dim(cisTopicObject@selected.model$document_expects)
+
+brain[['lda']] <- CreateDimReducObject(embeddings = t(cisTopicObject@selected.model$document_expects), key = "lda_", assay = "peaks")
+
+```
+
+## Cross-Modality Analyses
+
+
+Destin2 offers three options for cross-modality integration: consensus PCA, multiple CCA, and weighted nearest neighbor. These are implemented in the functions `GetConsensusPCA`, `GetMultiCCA`, and `FindMultiModalNeighbors` from the Seurat V4 package.
+
+`GetConsensusPCA` and `GetMultiCCA` have a similar set of main parameters:
+
+ * `obj`: Seurat object
+ * `reduction.list`: List of dimensional reduction objects within obj
+ * `dims.list`: Dimensions of reduction objects to use for the joint dimension reduction
+ * `reduction.name`: Name of resulting joint dimension object, to be stored in obj
+ * `reduction.key`: Prefix for resulting joint dimension object
+ * `assay`: Name of assay used to calculate dimensional reduction
+
+```{r, warning = F, message = F}
+
+## list of dimensional reduction objects in brain
+reductions <- list('lsi','lda','activity.pca','motif.pca')
+## dimensions to use for each dimensionality reduction object; we choose 30 for this demonstration
+## we drop first PC from lsi based on correlation with sequencing depth
+reduction_dims <- list(2:31, 1:30, 1:30, 1:30)
+
+brain <- GetConsensusPCA(brain, reduction.list=reductions,
+                  dims.list = reduction_dims,
+                  reduction.name = 'consensus.pca',
+                  reduction.key = "consensuspca_", 
+                  assay = "peaks")
+
+brain <- GetMultiCCA(brain, reduction.list=reductions,
+                         dims.list = reduction_dims,
+                         reduction.name = 'multicca.pca',
+                         reduction.key = "multiccapca_",
+                         assay = "peaks")
+
+brain <- FindMultiModalNeighbors(brain, reduction.list=reductions,
+                                 dims.list = reduction_dims, verbose=FALSE)
+
+brain
+```
+
+We demonstrate the utility of the cross-modality framework that Destin2 offers through graph-based clustering and non-linear dimension reduction and visualization using UMAP. 
+
+```{r, fig.width=12, fig.height=8}
+
+########################
+#### Consensus PCA
+########################
+brain <- RunUMAP(brain, dims = 1:30, reduction='consensus.pca', 
+               reduction.name='consensus.umap', reduction.key = 'consensusumap_', verbose = FALSE)
+
+DefaultAssay(brain)='peaks'
+brain <- FindNeighbors(object = brain, reduction = 'consensus.pca', dims = 1:30, verbose = FALSE, graph.name=c('consensuspca_nn','consensuspca_snn'))
+brain <- FindClusters(object = brain, algorithm = 1, verbose = FALSE, graph.name='consensuspca_snn')
+  
+brain$consensus_clusters=brain$seurat_clusters
+p1=DimPlot(object = brain, group.by='consensus_clusters', label = TRUE, reduction = 'consensus.umap') + NoLegend()+ggtitle('Consensus PCA')
+p2=DimPlot(object = brain, group.by='predicted.id', label = TRUE, reduction = 'consensus.umap') + NoLegend()+ggtitle('Consensus PCA')
+p1+p2
+
+########################
+#### MultiCCA
+########################
+brain <- RunUMAP(brain, dims = 1:30, reduction='multicca.pca', 
+               reduction.name='multicca.umap', reduction.key = 'multiccaumap_', verbose = FALSE)
+brain <- FindNeighbors(object = brain, reduction = 'multicca.pca', dims = 1:30, verbose = FALSE, graph.name=c('multicca_nn','multicca_snn'))
+brain <- FindClusters(object = brain, algorithm = 1, verbose = FALSE, graph.name='multicca_snn')
+  
+brain$cc_clusters = brain$seurat_clusters
+p1=DimPlot(object = brain, label = TRUE, group.by='cc_clusters',reduction = 'multicca.umap') + NoLegend()+ggtitle('MultiCCA')
+p2=DimPlot(object = brain, group.by='predicted.id',label = TRUE, reduction = 'multicca.umap') + NoLegend() +ggtitle('MultiCCA')
+p1+p2
+
+  
+########################
+#### Weighted NN
+########################
+
+brain <- RunUMAP(brain, nn.name = "weighted.nn", reduction.name = "wnn.umap", reduction.key = "wnnUMAP_")
+brain <- FindClusters(brain, graph.name = "wsnn", algorithm = 3, resolution = 2, verbose = FALSE)
+brain$wnn_clusters = brain$seurat_clusters
+
+p1=DimPlot(object = brain, label = TRUE, group.by='wnn_clusters',reduction = 'wnn.umap') + NoLegend()+ggtitle('WNN')
+p2=DimPlot(object = brain, group.by='predicted.id',label = TRUE, reduction = 'wnn.umap') + NoLegend() +ggtitle('WNN')
+p1+p2
+
+```
+
+For further clustering inference, the [clustree](https://github.com/lazappi/clustree) allows us to build clustering trees and measure the stability of clusters as resolution increases.
+
+```{r, fig.width=12, fig.height=10}
+
+#########################################################
+  ##  clustree to determine the number of clusters / resolution
+  #########################################################
+
+  resolution.range <- seq(from = 0.2, to = 1.2, by = 0.2)
+  brain <- FindClusters(object = brain, algorithm = 1, verbose = FALSE, resolution = resolution.range, graph.name='consensuspca_snn')
+  brain.cpca.clustree=clustree(brain, prefix = 'consensuspca_snn_res.')
+  p1=brain.cpca.clustree
+  # The stability index from the SC3 package (Kiselev et al. 2017) measures the stability of clusters across resolutions.
+  # The stability index is automatically calculated when a clustering tree is built.
+  brain.cpca.clustree=clustree(brain, prefix = 'consensuspca_snn_res.', node_colour = "sc3_stability")
+  p2=brain.cpca.clustree
+  p1+p2
+  
+  resolution.range <- seq(from = 0.2, to = 1.2, by = 0.2)
+  brain <- FindClusters(object = brain, algorithm = 1, verbose = FALSE, resolution = resolution.range, graph.name='multicca_snn')
+  brain.mcca.clustree=clustree(brain, prefix = 'multicca_snn_res.')
+  p1=brain.mcca.clustree
+  brain.mcca.clustree=clustree(brain, prefix = 'multicca_snn_res.', node_colour = "sc3_stability")
+  p2=brain.mcca.clustree
+  p1+p2
+  
+  resolution.range <- seq(from = 0.2, to = 1.2, by = 0.2)
+  brain <- FindClusters(object = brain, algorithm = 1, resolution = resolution.range, verbose = FALSE, graph.name = "wsnn")
+  brain.wnn.clustree=clustree(brain, prefix = 'wsnn_res.')
+  p1=brain.wnn.clustree
+  brain.wnn.clustree=clustree(brain, prefix = 'wsnn_res.', node_colour = "sc3_stability")
+  p2=brain.wnn.clustree
+  p1+p2
+  
+  
+```
+
+The final part of our analysis uses the [Slingshot](https://bmcgenomics.biomedcentral.com/articles/10.1186/s12864-018-4772-0) package to perform trajectory inference. The `GetSlingshot` function provides a convenient wrapper to this package. [A vignette on Slingshot can be found here.](https://bioconductor.org/packages/devel/bioc/vignettes/slingshot/inst/doc/vignette.html)
+
+`GetSlingshot` takes the following parameters:
+
+ * `obj`: Seurat object
+ * `reduction.to.construct`: Dimension reduction object used to infer lineages
+ * `reduction.to.plot`: Dimension reduction object used to cluster centroids and plot lineages
+ * `cluster`: Vector of cluster identity for each sample
+ * `predicted.id`: String specifying (transferred) cell labels
+ * `generate.plot`: If true, returns Slingshot plots
+
+
+```{r, fig.width=12, fig.height=7}
+CPCALineages <- GetSlingshot(brain, reduction.to.construct = 'consensus.pca',
+                      reduction.to.plot='consensus.umap',
+                      cluster='consensus_clusters', 
+                      predicted.id='predicted.id',
+                      generate.plot = TRUE)
+CPCALineages
+
+MCCALineages <- GetSlingshot(brain, reduction.to.construct = 'multicca.pca',
+                      reduction.to.plot='multicca.umap',
+                      cluster='cc_clusters', 
+                      predicted.id='predicted.id',
+                      generate.plot = TRUE)
+MCCALineages
+
+```
+
+```{r message=FALSE, warning=FALSE, echo=FALSE}
+saveRDS(object = brain, file = "../data/brain.rds")
+```
+
+```{r}
+sessionInfo()
+```
+
