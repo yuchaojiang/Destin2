@@ -1,3 +1,15 @@
+library(Matrix)
+library(GenomicRanges)
+library(Seurat)
+library(Signac)
+library(EnsDb.Mmusculus.v79)
+library(dplyr)
+library(ggplot2)
+library(chromVAR)
+library(JASPAR2020)
+library(TFBSTools)
+library(motifmatchr)
+library(BSgenome.Mmusculus.UCSC.mm10)
 
 ct=read.table('celltype_skin.txt', header = T, sep='\t')
 # first column: atac barcode
@@ -18,8 +30,6 @@ rm(peak.barcodes)
 
 # Read in the peak matrix: stored as Market matrix
 # https://atlas.gs.washington.edu/mouse-atac/docs/
-library(Matrix)
-library(GenomicRanges)
 peak.count= readMM("GSM4156597_skin.late.anagen.counts.txt.gz")
 dim(peak.count)
 peak.bed=read.delim('GSM4156597_skin.late.anagen.peaks.bed.gz', header=FALSE)
@@ -32,13 +42,6 @@ dim(ct) # barcode and cell type
 dim(peak.count) # peak count
 length(peak.granges) # GRanges for peaks
 dim(rna.count) # rna count
-
-
-library(Seurat)
-library(Signac)
-library(EnsDb.Mmusculus.v79) # For mouse skin
-library(dplyr)
-library(ggplot2)
 
 # Create Seurat object
 skin <- CreateSeuratObject(counts = rna.count)
@@ -74,12 +77,6 @@ skin@assays$ATAC
 rm(peak.count)
 save(skin, file='skin_cluster.rda')
 
-
-library(Seurat)
-library(Signac)
-library(EnsDb.Mmusculus.v79) # For mouse skin
-library(dplyr)
-library(ggplot2)
 load('skin_cluster.rda')
 
 ## perform basic qc based on the number of detected molecules for each modality
@@ -185,16 +182,10 @@ p25=DimPlot(skin, reduction = "wnn.umap", group.by = paste('wsnn_res.',wnn.resol
                 length(levels(skin@meta.data[,paste('wsnn_res.',wnn.resolution,sep='')])), 'clusters'))+ NoLegend()
 p25
 
-
 p5|p15|p25
-
-
 
 dir.out <- "./"
 dir.in <- "./"
-
-library(Seurat)
-library(Signac)
 
 ## add a fragment object
 # read in the skin seurat object
@@ -246,64 +237,6 @@ file <- "skin.frag.rds"
 path <- paste(dir.in, file, sep="")
 if (!file.exists(path)) saveRDS(skin.frag, file=path)
 
-# # sanity check (see Figure 2H in Ma et al. (2020))
-# # Gapdh
-# fig <- paste("covplot_Gapdh.pdf", sep="")
-# path <- paste(dir.fig, fig, sep="")
-# pdf(path, height=8, width=12)
-# CoveragePlot(
-#   object = skin,
-#   region = "Gapdh",
-#   annotation = T,
-#   peaks = T,
-#   extend.downstream = 10000
-# )
-# dev.off()
-# 
-# # Krt5
-# fig <- paste("covplot_Krt5.pdf", sep="")
-# path <- paste(dir.fig, fig, sep="")
-# pdf(path, height=8, width=12)
-# CoveragePlot(
-#   object = skin,
-#   region = "Krt5",
-#   annotation = T,
-#   peaks = T,
-#   extend.downstream = 10000
-# )
-# dev.off()
-# 
-# # Krt15
-# fig <- paste("covplot_Krt15.pdf", sep="")
-# path <- paste(dir.fig, fig, sep="")
-# pdf(path, height=8, width=12)
-# CoveragePlot(
-#   object = skin,
-#   region = "Krt15",
-#   annotation = T,
-#   peaks = T,
-#   extend.upstream = 10000
-# )
-# dev.off()
-# 
-# # Lgr5
-# fig <- paste("covplot_Lgr5.pdf", sep="")
-# path <- paste(dir.fig, fig, sep="")
-# pdf(path, height=8, width=12)
-# CoveragePlot(
-#   object = skin,
-#   region = "Lgr5",
-#   annotation = T,
-#   peaks = T,
-#   extend.upstream = 10000
-# )
-# dev.off()
-
-
-
-library(Seurat)
-library(Signac)
-
 skin=readRDS('skin.frag.rds')
 
 ## run chromVAR
@@ -312,12 +245,6 @@ levels(skin)
 #  [1] "0"  "1"  "2"  "3"  "4"  "5"  "6"  "7"  "8"  "9"  "10" "11" "12" "13" "14"
 # [16] "15" "16" "17" "18" "19" "20" "21" "22" "23" "24" "25" "26" "27"
 celltype.names <- levels(skin)
-
-library(chromVAR)
-library(JASPAR2020)
-library(TFBSTools)
-library(motifmatchr)
-library(BSgenome.Mmusculus.UCSC.mm10)
 
 DefaultAssay(skin) <- "ATAC"
 # https://satijalab.org/signac/articles/motif_vignette.html
