@@ -126,7 +126,7 @@ DefaultAssay(skin) <- "ATAC"
 
 # Below is a short-cut but is not very precise: we only aggregate reads in the peak regions
 # But there are reads off peak regions but within gene bodies that are defined
-# Will load the fragment file in the second script.
+# Will load the fragment file later.
 annotation <- Annotation(object = skin)
 transcripts <- Signac:::CollapseToLongestTranscript(ranges = annotation)
 transcripts <- transcripts[transcripts$gene_biotype == "protein_coding"]
