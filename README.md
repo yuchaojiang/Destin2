@@ -34,5 +34,5 @@ Please do not email but post [here](https://github.com/yuchaojiang/Destin2/issue
 To ensure rigor and reproducibility, we have made our analysis scripts available. Please refer to the [script](https://github.com/yuchaojiang/Destin2/tree/main/script) folder.
 
 ## Reference
-Guan PY, Lee JS, Wang L, Lin KZ, Wen M, Jiang Y. Destin2: integrative and cross-modality analysis of single-cell chromatin accessibility data. *bioRxiv*, 2022.
+Guan PY, Lee JS, Wang L, Lin KZ, Wen M, Chen L, Jiang Y. Destin2: integrative and cross-modality analysis of single-cell chromatin accessibility data. *Frontiers in Genetics*, 14, 1089936, 2023. ([link](https://www.frontiersin.org/articles/10.3389/fgene.2023.1089936/full))
 
